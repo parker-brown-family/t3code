@@ -35,7 +35,9 @@ export function placePageNotes(
     const annotation = pageNoteAnnotation(page, name, comment, text.text, createdAt);
     const capture = capturePreviewAnnotationScreenshot(annotation);
     const kept = capture.status === "failed" ? { ...annotation, screenshot: null } : annotation;
-    store.addPreviewAnnotation(target, kept);
+    // Appended rather than inserted at the caret: many notes arrive at once, and inserting each
+    // one through the editor re-renders it synchronously for every note.
+    store.addPreviewAnnotation(target, kept, { insertAtCaret: false });
     if (capture.status === "failed") droppedPictures++;
     if (capture.status !== "captured" || kept.screenshot === null) continue;
     const image: ComposerImageAttachment = {

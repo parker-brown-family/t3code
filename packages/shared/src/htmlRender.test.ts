@@ -98,6 +98,12 @@ describe("readPageComposeRequest", () => {
         readPageComposeRequest(compose([{ ...note, image }]))?.comments[0]?.image,
       ).toBeUndefined();
     }
+    // At most eight pictures per send; the ninth note keeps its text and loses its picture.
+    const nine = readPageComposeRequest(
+      compose(Array.from({ length: 9 }, () => ({ ...note, image: png }))),
+    );
+    expect(nine?.comments.filter((comment) => comment.image !== undefined)).toHaveLength(8);
+    expect(nine?.comments).toHaveLength(9);
     expect(
       readPageComposeRequest(compose([{ ...note, rect: { x: 0, y: "1", width: 1, height: 1 } }]))
         ?.comments[0]?.rect,

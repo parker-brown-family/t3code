@@ -177,6 +177,8 @@ export function BrowserDocumentFrame(props: {
   );
 }
 
+const PAGE_REVEAL_FALLBACK_MS = 1_500;
+
 // URL renewals must not discard form input or scroll; a new key mounts a fresh document.
 function FileDocument(props: {
   readonly src: string;
@@ -186,6 +188,12 @@ function FileDocument(props: {
 }) {
   const [src] = useState(props.src);
   const [loaded, setLoaded] = useState(false);
+  // A page waiting on a slow remote resource may not fire load for a long time; show it anyway.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reveals the frame if its load event is slow to arrive
+  useEffect(() => {
+    const timer = setTimeout(() => setLoaded(true), PAGE_REVEAL_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const compose = usePageCompose(props);
   const onFrameMessage = useEffectEvent((frame: HTMLIFrameElement, data: unknown) => {
@@ -221,7 +229,7 @@ function FileDocument(props: {
 }
 
 /**
- * Reader notes a page sends become review comments in the composer, unsent. Like links, they
+ * Reader notes a page sends become annotations in the composer, unsent. Like links, they
  * need the reader's own recent click in the focused frame, so a page cannot fill the composer
  * on load or by itself.
  */

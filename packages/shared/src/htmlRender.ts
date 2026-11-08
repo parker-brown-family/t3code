@@ -286,6 +286,8 @@ const MAX_COMPOSE_ANCHOR_LENGTH = 200;
 // A pasted picture arrives as a PNG data URL; this bounds it near T3's 10 MB image limit.
 const MAX_COMPOSE_IMAGE_LENGTH = 12_000_000;
 const COMPOSE_PNG_PREFIX = "data:image/png;base64,";
+// As in Terminal Delight, a send carries at most eight pictures; notes past that keep their text.
+const MAX_COMPOSE_IMAGES = 8;
 
 export interface PageComposeRect {
   readonly x: number;
@@ -344,6 +346,7 @@ export function readPageComposeRequest(data: unknown):
   if (!Array.isArray(comments) || comments.length === 0) return undefined;
   if (comments.length > MAX_COMPOSE_COMMENTS) return undefined;
   const read: Array<PageComposeComment> = [];
+  let images = 0;
   for (const comment of comments) {
     if (typeof comment !== "object" || comment === null) return undefined;
     const { anchor, title, quote, text, rect, image } = comment as Record<string, unknown>;
@@ -356,7 +359,9 @@ export function readPageComposeRequest(data: unknown):
       quote: typeof quote === "string" ? quote.trim().slice(0, MAX_COMPOSE_QUOTE_LENGTH) : "",
       text: trimmed,
       ...(readComposeRect(rect) ? { rect: readComposeRect(rect) } : {}),
-      ...(readComposeImage(image) ? { image: readComposeImage(image) } : {}),
+      ...(images < MAX_COMPOSE_IMAGES && readComposeImage(image)
+        ? (images++, { image: readComposeImage(image) })
+        : {}),
     });
   }
   return { id, comments: read, close: close === true };
