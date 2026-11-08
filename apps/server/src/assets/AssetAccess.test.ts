@@ -853,40 +853,56 @@ describe("AssetAccess", () => {
       }).pipe(Effect.provide(layerTest)),
   );
 
-  it.effect("versions media by file changes rather than by re-signing", () =>
+  it.effect("versions media and workspace pages by file changes rather than by re-signing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-media-revision-" });
-      const filePath = path.join(root, "recording.mp4");
-      yield* fs.writeFileString(filePath, "original");
-      yield* Effect.promise(() => NodeFSP.utimes(filePath, 1_000, 1_000));
-      const input = {
-        resource: {
-          _tag: "media-file" as const,
-          threadId: ThreadId.make("thread-1"),
-          path: filePath,
-        },
-      };
-      const original = yield* issueAssetUrl(input);
-      expect(original.fileRevision).toEqual(expect.any(String));
+      // A page in the workspace is reloaded on its revision, so it must not change with each re-sign.
+      for (const fileName of ["recording.mp4", "report.html"]) {
+        const filePath = path.join(root, fileName);
+        yield* fs.writeFileString(filePath, "original");
+        yield* Effect.promise(() => NodeFSP.utimes(filePath, 1_000, 1_000));
+        const input =
+          fileName === "report.html"
+            ? {
+                resource: {
+                  _tag: "workspace-file" as const,
+                  threadId: ThreadId.make("thread-1"),
+                  path: filePath,
+                },
+                workspaceRoot: root,
+              }
+            : {
+                resource: {
+                  _tag: "media-file" as const,
+                  threadId: ThreadId.make("thread-1"),
+                  path: filePath,
+                },
+              };
+        const original = yield* issueAssetUrl(input);
+        expect({ fileName, revision: original.fileRevision }).toEqual({
+          fileName,
+          revision: expect.any(String),
+        });
 
-      yield* TestClock.adjust("1 minute");
-      const renewed = yield* issueAssetUrl(input);
-      expect(renewed.relativeUrl).not.toBe(original.relativeUrl);
-      expect(renewed.fileRevision).toBe(original.fileRevision);
+        yield* TestClock.adjust("1 minute");
+        const renewed = yield* issueAssetUrl(input);
+        expect(renewed.relativeUrl).not.toBe(original.relativeUrl);
+        expect(renewed.fileRevision).toBe(original.fileRevision);
 
-      yield* fs.writeFileString(filePath, "modified");
-      yield* Effect.promise(() => NodeFSP.utimes(filePath, 2_000, 2_000));
-      const edited = yield* issueAssetUrl(input);
-      expect(edited.fileRevision).not.toBe(original.fileRevision);
+        yield* fs.writeFileString(filePath, "modified");
+        yield* Effect.promise(() => NodeFSP.utimes(filePath, 2_000, 2_000));
+        const edited = yield* issueAssetUrl(input);
+        expect(edited.fileRevision).not.toBe(original.fileRevision);
 
-      const replacement = path.join(root, "replacement.mp4");
-      yield* fs.writeFileString(replacement, "modified");
-      yield* Effect.promise(() => NodeFSP.utimes(replacement, 2_000, 2_000));
-      yield* fs.rename(replacement, filePath);
-      const replaced = yield* issueAssetUrl(input);
-      expect(replaced.fileRevision).not.toBe(edited.fileRevision);
+        const replacement = path.join(root, `replacement-${fileName}`);
+        yield* fs.writeFileString(replacement, "modified");
+        yield* Effect.promise(() => NodeFSP.utimes(replacement, 2_000, 2_000));
+        yield* fs.rename(replacement, filePath);
+        const replaced = yield* issueAssetUrl(input);
+        expect(replaced.fileRevision).not.toBe(edited.fileRevision);
+      }
     }).pipe(Effect.provide(layerTest)),
   );
 

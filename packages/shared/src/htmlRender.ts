@@ -275,6 +275,97 @@ export function readHtmlRenderLinkRequest(data: unknown):
     : undefined;
 }
 
+// A page's reader notes become review comments in the thread's composer, unsent. The host
+// announces it on load so a page shows its send button only where something will receive it.
+const COMPOSE_METHOD = "t3/compose";
+const PAGE_HOST_METHOD = "t3/notifications/page-host";
+const MAX_COMPOSE_COMMENTS = 200;
+const MAX_COMPOSE_TEXT_LENGTH = 8_000;
+const MAX_COMPOSE_QUOTE_LENGTH = 2_000;
+const MAX_COMPOSE_ANCHOR_LENGTH = 200;
+// A pasted picture arrives as a PNG data URL; this bounds it near T3's 10 MB image limit.
+const MAX_COMPOSE_IMAGE_LENGTH = 12_000_000;
+const COMPOSE_PNG_PREFIX = "data:image/png;base64,";
+
+export interface PageComposeRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface PageComposeComment {
+  /** The page element the note is on, such as `fig-lift`. */
+  readonly anchor: string;
+  /** That element's own label, such as its heading or caption. */
+  readonly title: string;
+  /** What the reader was looking at when they wrote the note. May be empty. */
+  readonly quote: string;
+  readonly text: string;
+  /** Where the element sat on the page when the note was sent, if the page measured it. */
+  readonly rect?: PageComposeRect | undefined;
+  /** A picture the reader attached to the element. */
+  readonly image?:
+    | { readonly dataUrl: string; readonly width: number; readonly height: number }
+    | undefined;
+}
+
+function readComposeRect(value: unknown): PageComposeRect | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { x, y, width, height } = value as Record<string, unknown>;
+  return [x, y, width, height].every((n) => typeof n === "number" && Number.isFinite(n))
+    ? { x: x as number, y: y as number, width: width as number, height: height as number }
+    : undefined;
+}
+
+function readComposeImage(value: unknown): PageComposeComment["image"] {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { dataUrl, width, height } = value as Record<string, unknown>;
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith(COMPOSE_PNG_PREFIX)) return undefined;
+  if (dataUrl.length > MAX_COMPOSE_IMAGE_LENGTH) return undefined;
+  if (typeof width !== "number" || typeof height !== "number") return undefined;
+  if (!(width > 0 && height > 0)) return undefined;
+  return { dataUrl, width, height };
+}
+
+export function readPageComposeRequest(data: unknown):
+  | {
+      readonly id: string | number;
+      readonly comments: ReadonlyArray<PageComposeComment>;
+      readonly close: boolean;
+    }
+  | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const { jsonrpc, id, method, params } = data as Record<string, unknown>;
+  if (jsonrpc !== "2.0" || method !== COMPOSE_METHOD) return undefined;
+  if (typeof id !== "string" && typeof id !== "number") return undefined;
+  if (typeof params !== "object" || params === null) return undefined;
+  const { comments, close } = params as Record<string, unknown>;
+  if (!Array.isArray(comments) || comments.length === 0) return undefined;
+  if (comments.length > MAX_COMPOSE_COMMENTS) return undefined;
+  const read: Array<PageComposeComment> = [];
+  for (const comment of comments) {
+    if (typeof comment !== "object" || comment === null) return undefined;
+    const { anchor, title, quote, text, rect, image } = comment as Record<string, unknown>;
+    if (typeof anchor !== "string" || typeof text !== "string") return undefined;
+    const trimmed = text.trim();
+    if (trimmed === "" || trimmed.length > MAX_COMPOSE_TEXT_LENGTH) return undefined;
+    read.push({
+      anchor: anchor.trim().slice(0, MAX_COMPOSE_ANCHOR_LENGTH),
+      title: typeof title === "string" ? title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) : "",
+      quote: typeof quote === "string" ? quote.trim().slice(0, MAX_COMPOSE_QUOTE_LENGTH) : "",
+      text: trimmed,
+      ...(readComposeRect(rect) ? { rect: readComposeRect(rect) } : {}),
+      ...(readComposeImage(image) ? { image: readComposeImage(image) } : {}),
+    });
+  }
+  return { id, comments: read, close: close === true };
+}
+
+export function pageHostMessage() {
+  return { jsonrpc: "2.0", method: PAGE_HOST_METHOD, params: { compose: true } } as const;
+}
+
 /** Published local images arrive as `data:image/` URLs. */
 export function readHtmlRenderImageRequest(
   data: unknown,

@@ -510,8 +510,23 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     )
       ? yield* readImageDimensionsFromHeader(canonicalFile)
       : null;
+    const html = /\.html?$/i.test(resolved.relativePath);
+    // A page reloads only when its own file changes, so an agent editing other files does not
+    // reset it. An unreadable stat leaves the revision unknown and the client falls back.
+    const fileRevision = html
+      ? yield* fileSystem.stat(canonicalFile).pipe(
+          Effect.map(
+            (info) =>
+              `${info.dev}:${Option.getOrElse(info.ino, () => "")}:${info.size}:${Option.getOrElse(
+                Option.map(info.mtime, (mtime) => mtime.getTime()),
+                () => "",
+              )}`,
+          ),
+          Effect.orElseSucceed(() => undefined),
+        )
+      : undefined;
     return {
-      claims: !/\.html?$/i.test(resolved.relativePath)
+      claims: !html
         ? {
             version: 1 as const,
             kind: "workspace-file-exact" as const,
@@ -528,7 +543,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
           },
       fileName: path.basename(resolved.relativePath),
       imageDimensions,
-      fileRevision: undefined,
+      fileRevision,
     };
   },
 );
@@ -603,6 +618,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       claims = finalized.claims;
       fileName = finalized.fileName;
       imageDimensions = finalized.imageDimensions;
+      fileRevision = finalized.fileRevision;
       break;
     }
     case "draft-workspace-file": {
