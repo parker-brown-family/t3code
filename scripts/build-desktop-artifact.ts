@@ -2892,7 +2892,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const repoRoot = yield* RepoRoot;
     buildConfig.afterPack = path.join(repoRoot, "scripts/linux-after-pack.ts");
     buildConfig.linux = {
-      target: target === "AppImage" ? [target, "deb"] : [target],
+      // T3CODE_LINUX_DEB=0 skips the .deb, whose packager needs libcrypt.so.1 (absent on Arch).
+      target:
+        target === "AppImage" && process.env.T3CODE_LINUX_DEB !== "0" ? [target, "deb"] : [target],
       executableName: "t3code",
       icon: "icons",
       category: "Development",
