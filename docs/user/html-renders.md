@@ -19,3 +19,7 @@ An app can open full screen right after you tap or click in it. On web and deskt
 ## Notes on a page
 
 A page opened in the side panel, or shown in a thread, can hand you its reader's notes. Pages that support it show a send button once T3 Code has loaded them. Pressing it puts each note in your message box as its own annotation, naming the part of the page it is on, with any picture you attached to it, and can close the page. Nothing is sent until you send the message. A page can do this only right after you click inside it, at most eight pictures go with one send, and hidden characters are removed from the notes.
+
+## Notes on a Markdown file
+
+A Markdown file opened in the side panel takes notes in its rendered view too. Point at a paragraph, heading, list item, table or code block and press the note button beside it. Each note goes straight into your message box as a file comment, the same kind the source view makes: it names the file and the lines the block came from, quotes those lines, and carries your remark. Paste or drop a picture into the note box, or press Add picture, and it goes with the note as an image; removing the note from your message removes its pictures too. The note box stays open for the next note. The bar above the file counts your notes, and Send to agent closes the file and puts you in the message box. Nothing is sent until you send the message.

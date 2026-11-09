@@ -931,6 +931,7 @@ function RenderedMarkdownSurface({
   workspaceMutationId,
   readOnly,
   onPendingChange,
+  noteTarget,
 }: Omit<
   EditableFileSurfaceProps,
   | "resolvedTheme"
@@ -943,6 +944,7 @@ function RenderedMarkdownSurface({
   threadRef: ScopedThreadRef;
   readOnly: boolean;
   workspaceMutationId: string | null;
+  noteTarget: ScopedThreadRef | DraftId;
 }) {
   const saveTarget = { environmentId, cwd, relativePath };
   useFileSaveSession(saveTarget, onPendingChange);
@@ -955,6 +957,8 @@ function RenderedMarkdownSurface({
         relativePath={relativePath}
         threadRef={threadRef}
         workspaceMutationId={workspaceMutationId}
+        noteTarget={noteTarget}
+        onNotesClose={() => useRightPanelStore.getState().close(threadRef)}
         onTaskListChange={
           readOnly
             ? undefined
@@ -1498,6 +1502,7 @@ export default function FilePreviewPanel({
                 workspaceMutationId={workspaceMutationId}
                 readOnly={file.data.truncated || isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
+                noteTarget={composerDraftTarget}
               />
             ) : tableDelimiter && renderTable ? (
               <DelimitedTablePreview

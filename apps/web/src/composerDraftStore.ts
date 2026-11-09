@@ -727,6 +727,8 @@ const EMPTY_PERSISTED_ATTACHMENTS: PersistedComposerImageAttachment[] = [];
 const EMPTY_TERMINAL_CONTEXTS: TerminalContextDraft[] = [];
 const EMPTY_PREVIEW_ANNOTATIONS: PreviewAnnotationPayload[] = [];
 const EMPTY_REVIEW_COMMENTS: ReviewCommentContext[] = [];
+/** A picture attached to a review comment is the image `<comment id>#picture-<n>`. */
+export const REVIEW_COMMENT_PICTURE_SEPARATOR = "#picture-";
 const EMPTY_THREAD_CONTEXTS: ThreadContextRecord[] = [];
 const EMPTY_ENVIRONMENT_CONTEXTS: EnvironmentContextRecord[] = [];
 Object.freeze(EMPTY_IMAGES);
@@ -3963,11 +3965,17 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         removeReviewComment: (threadRef, commentId) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef);
           if (!threadKey || !commentId) return;
+          const picturePrefix = `${commentId}${REVIEW_COMMENT_PICTURE_SEPARATOR}`;
+          const isNotePicture = (imageId: string) => imageId.startsWith(picturePrefix);
+          for (const image of get().draftsByThreadKey[threadKey]?.images ?? []) {
+            if (isNotePicture(image.id)) revokeObjectPreviewUrl(image.previewUrl);
+          }
           set((state) => {
             const current = state.draftsByThreadKey[threadKey];
             if (!current) return state;
             const reviewComments = current.reviewComments.filter((entry) => entry.id !== commentId);
             if (reviewComments.length === current.reviewComments.length) return state;
+            // A note left on a rendered file brings its pictures as images named after it.
             const nextDraft = {
               ...current,
               prompt: removeInlineContextReference(
@@ -3975,6 +3983,13 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 reviewCommentContextId(commentId),
               ).prompt,
               reviewComments,
+              images: current.images.filter((image) => !isNotePicture(image.id)),
+              persistedAttachments: current.persistedAttachments.filter(
+                (image) => !isNotePicture(image.id),
+              ),
+              nonPersistedImageIds: current.nonPersistedImageIds.filter(
+                (imageId) => !isNotePicture(imageId),
+              ),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];
