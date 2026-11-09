@@ -4,6 +4,7 @@ import {
   injectHtmlRenderBootstrap,
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
+  readPageComposeRequest,
 } from "./htmlRender.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
@@ -60,6 +61,67 @@ describe("injectHtmlRenderBootstrap", () => {
       injected.indexOf("<html><head>"),
     );
     expect(injected).toContain('<meta name="viewport" content="width=device-width');
+  });
+});
+
+describe("readPageComposeRequest", () => {
+  it("reads bounded reader notes and refuses anything malformed", () => {
+    const compose = (comments: unknown, extra = {}) => ({
+      jsonrpc: "2.0",
+      id: "n1",
+      method: "t3/compose",
+      params: { comments, ...extra },
+    });
+    const note = { anchor: " fig-lift ", title: "04 · The lift", quote: "", text: " So cool " };
+    expect(readPageComposeRequest(compose([note], { close: true }))).toEqual({
+      id: "n1",
+      comments: [{ anchor: "fig-lift", title: "04 · The lift", quote: "", text: "So cool" }],
+      close: true,
+    });
+    expect(readPageComposeRequest(compose([note], { close: "yes" }))?.close).toBe(false);
+    const png = { dataUrl: "data:image/png;base64,iVBORw0KGgo=", width: 4, height: 3 };
+    const rect = { x: 0, y: 10, width: 300, height: 120 };
+    expect(readPageComposeRequest(compose([{ ...note, rect, image: png }]))?.comments[0]).toEqual({
+      anchor: "fig-lift",
+      title: "04 · The lift",
+      quote: "",
+      text: "So cool",
+      rect,
+      image: png,
+    });
+    // A picture that is not a PNG data URL, or has no size, is dropped and the note kept.
+    for (const image of [
+      { ...png, dataUrl: "https://example.com/a.png" },
+      { ...png, width: 0 },
+    ]) {
+      expect(
+        readPageComposeRequest(compose([{ ...note, image }]))?.comments[0]?.image,
+      ).toBeUndefined();
+    }
+    // At most eight pictures per send; the ninth note keeps its text and loses its picture.
+    const nine = readPageComposeRequest(
+      compose(Array.from({ length: 9 }, () => ({ ...note, image: png }))),
+    );
+    expect(nine?.comments.filter((comment) => comment.image !== undefined)).toHaveLength(8);
+    expect(nine?.comments).toHaveLength(9);
+    expect(
+      readPageComposeRequest(compose([{ ...note, rect: { x: 0, y: "1", width: 1, height: 1 } }]))
+        ?.comments[0]?.rect,
+    ).toBeUndefined();
+    expect(readPageComposeRequest(compose([]))).toBeUndefined();
+    expect(readPageComposeRequest(compose([{ ...note, text: "  " }]))).toBeUndefined();
+    expect(readPageComposeRequest(compose([{ ...note, text: "x".repeat(8_001) }]))).toBeUndefined();
+    expect(
+      readPageComposeRequest(compose(Array.from({ length: 201 }, () => note))),
+    ).toBeUndefined();
+    expect(readPageComposeRequest(compose([{ anchor: 1, text: "hi" }]))).toBeUndefined();
+    expect(
+      readPageComposeRequest({
+        jsonrpc: "2.0",
+        method: "t3/compose",
+        params: { comments: [note] },
+      }),
+    ).toBeUndefined();
   });
 });
 

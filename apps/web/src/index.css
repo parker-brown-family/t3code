@@ -1875,6 +1875,26 @@ code {
   margin-bottom: 0;
 }
 
+/* A rendered markdown file wraps each block with the source lines it came from (notes). */
+.chat-markdown > [data-source-lines]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > [data-source-lines]:last-child > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-notes [data-source-lines][data-has-note],
+.markdown-notes [data-source-lines][data-note-open] {
+  border-radius: 0.25rem;
+  background-color: color-mix(in oklab, var(--primary) 7%, transparent);
+}
+
+.markdown-notes [data-source-lines][data-note-open] {
+  outline: 1px solid color-mix(in oklab, var(--primary) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .chat-markdown p,
 .chat-markdown ul,
 .chat-markdown ol,

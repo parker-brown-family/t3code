@@ -68,7 +68,12 @@ import { isHostPath } from "@t3tools/shared/path";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
-import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import {
+  type ComposerThreadTarget,
+  type DraftId,
+  useComposerDraftStore,
+} from "~/composerDraftStore";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { buildFileReviewComment } from "~/reviewCommentContext";
 import { assetEnvironment } from "~/state/assets";
 import { usePreviewAvailable } from "~/browser/previewRuntime";
@@ -232,6 +237,7 @@ export function WorkspaceBrowserPreview(props: {
   readonly workspaceRoot: string;
   readonly title: string;
   readonly workspaceMutationId: string | null;
+  readonly composeTarget?: ComposerThreadTarget | undefined;
 }) {
   const pdf = isPdfPreviewFile(props.absolutePath);
   const resource = workspaceAssetResource({
@@ -241,12 +247,10 @@ export function WorkspaceBrowserPreview(props: {
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(
-    props.environmentId,
-    resource,
-    pdf ? props.workspaceMutationId : undefined,
-  );
-  const fileRevision = pdf && assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
+  // Like video, a page is keyed by its own file's revision, so an agent writing other files
+  // does not reload it, flash it, or throw away what the reader typed into it.
+  const assetUrl = useAssetUrlState(props.environmentId, resource, props.workspaceMutationId);
+  const fileRevision = assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
   const revision = fileRevision ?? props.workspaceMutationId;
   const revisionSuffix =
     revision === null
@@ -277,6 +281,9 @@ export function WorkspaceBrowserPreview(props: {
       documentId={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}`}
       title={props.title}
       pdf={pdf}
+      composeTarget={props.composeTarget}
+      // A page that sends its notes asks to be closed, the way Terminal Delight's send does.
+      onComposeClose={() => useRightPanelStore.getState().close(props.threadRef)}
     />
   );
 }
@@ -936,6 +943,7 @@ function RenderedMarkdownSurface({
   workspaceMutationId,
   readOnly,
   onPendingChange,
+  noteTarget,
 }: Omit<
   EditableFileSurfaceProps,
   | "resolvedTheme"
@@ -948,6 +956,7 @@ function RenderedMarkdownSurface({
   threadRef: ScopedThreadRef;
   readOnly: boolean;
   workspaceMutationId: string | null;
+  noteTarget: ScopedThreadRef | DraftId;
 }) {
   const saveTarget = { environmentId, cwd, relativePath };
   useFileSaveSession(saveTarget, onPendingChange);
@@ -960,6 +969,8 @@ function RenderedMarkdownSurface({
         relativePath={relativePath}
         threadRef={threadRef}
         workspaceMutationId={workspaceMutationId}
+        noteTarget={noteTarget}
+        onNotesClose={() => useRightPanelStore.getState().close(threadRef)}
         onTaskListChange={
           readOnly
             ? undefined
@@ -1412,6 +1423,7 @@ export default function FilePreviewPanel({
               workspaceRoot={cwd}
               title={relativePath}
               workspaceMutationId={workspaceMutationId}
+              composeTarget={composerDraftTarget}
             />
           ) : relativePath &&
             absolutePath &&
@@ -1503,6 +1515,7 @@ export default function FilePreviewPanel({
                 workspaceMutationId={workspaceMutationId}
                 readOnly={file.data.truncated || isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
+                noteTarget={composerDraftTarget}
               />
             ) : tableDelimiter && renderTable ? (
               <DelimitedTablePreview

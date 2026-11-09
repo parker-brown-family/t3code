@@ -12,10 +12,12 @@ import {
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
   htmlRenderResult,
+  pageHostMessage,
   readHtmlRenderContentHeight,
   readHtmlRenderImageRequest,
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
+  readPageComposeRequest,
 } from "@t3tools/shared/htmlRender";
 import {
   isMacPlatform,
@@ -32,7 +34,9 @@ import {
   useState,
 } from "react";
 import { isElectron } from "~/env";
+import type { ComposerThreadTarget } from "~/composerDraftStore";
 import { FileSurfaceLoading } from "./fileSurfaceChrome";
+import { placePageNotes } from "./pageNotes";
 import type { PdfViewState } from "./PdfViewer";
 
 import { useOpenLink } from "~/browser/useOpenLink";
@@ -139,6 +143,10 @@ export function BrowserDocumentFrame(props: {
   readonly documentKey?: string | undefined;
   /** Resource identity without its revision, so PDF reloads can retain the reading position. */
   readonly documentId?: string | undefined;
+  /** Where a page's reader notes go. Without one, a page is not offered the composer. */
+  readonly composeTarget?: ComposerThreadTarget | undefined;
+  /** Closes the surface after a page sends its notes and asks to be closed. */
+  readonly onComposeClose?: (() => void) | undefined;
 }) {
   const key = props.documentKey ?? props.src;
   return props.pdf ? (
@@ -155,23 +163,93 @@ export function BrowserDocumentFrame(props: {
       title={props.title}
       threadRef={props.threadRef}
       className="min-h-0 flex-1"
+      composeTarget={props.composeTarget}
+      onComposeClose={props.onComposeClose}
     />
   ) : (
-    <FileDocument key={key} src={props.src} title={props.title} />
+    <FileDocument
+      key={key}
+      src={props.src}
+      title={props.title}
+      composeTarget={props.composeTarget}
+      onComposeClose={props.onComposeClose}
+    />
   );
 }
 
+const PAGE_REVEAL_FALLBACK_MS = 1_500;
+
 // URL renewals must not discard form input or scroll; a new key mounts a fresh document.
-function FileDocument(props: { readonly src: string; readonly title: string }) {
+function FileDocument(props: {
+  readonly src: string;
+  readonly title: string;
+  readonly composeTarget?: ComposerThreadTarget | undefined;
+  readonly onComposeClose?: (() => void) | undefined;
+}) {
   const [src] = useState(props.src);
+  const [loaded, setLoaded] = useState(false);
+  // A page waiting on a slow remote resource may not fire load for a long time; show it anyway.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reveals the frame if its load event is slow to arrive
+  useEffect(() => {
+    const timer = setTimeout(() => setLoaded(true), PAGE_REVEAL_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const compose = usePageCompose(props);
+  const onFrameMessage = useEffectEvent((frame: HTMLIFrameElement, data: unknown) => {
+    compose(frame, data);
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- attaches the frame's message listener at commit, before the page can post
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (frame === null) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source === frame.contentWindow) onFrameMessage(frame, event.data);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
   return (
     <iframe
+      ref={frameRef}
       src={src}
       title={props.title}
-      className="min-h-0 flex-1 border-0 bg-white"
+      // White suits a page with no background of its own, but shown before the page paints it
+      // flashes over a dark panel, so the frame stays hidden until the page has loaded.
+      className={cn("min-h-0 flex-1 border-0 bg-white", !loaded && "invisible")}
       sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+      onLoad={() => {
+        setLoaded(true);
+        if (props.composeTarget !== undefined) {
+          frameRef.current?.contentWindow?.postMessage(pageHostMessage(), "*");
+        }
+      }}
     />
   );
+}
+
+/**
+ * Reader notes a page sends become annotations in the composer, unsent. Like links, they
+ * need the reader's own recent click in the focused frame, so a page cannot fill the composer
+ * on load or by itself.
+ */
+function usePageCompose(props: {
+  readonly title: string;
+  readonly composeTarget?: ComposerThreadTarget | undefined;
+  readonly onComposeClose?: (() => void) | undefined;
+}) {
+  return useEffectEvent((frame: HTMLIFrameElement, data: unknown): boolean => {
+    const request = readPageComposeRequest(data);
+    if (request === undefined) return false;
+    if (props.composeTarget === undefined) return true;
+    if (document.activeElement !== frame || navigator.userActivation?.isActive === false) {
+      return true;
+    }
+    placePageNotes(props.composeTarget, props.title, request.comments);
+    frame.contentWindow?.postMessage(htmlRenderResult(request.id), "*");
+    if (request.close) props.onComposeClose?.();
+    return true;
+  });
 }
 
 /** Keep the initial URL while mounted; re-signing must not reload the page. */
@@ -183,8 +261,17 @@ export function HtmlRenderDocument(props: {
   readonly onContentHeight?: (height: number) => void;
   /** Reports fullscreen changes so virtualized rows can stay mounted. */
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
+  /** Where the page's reader notes go; defaults to the page's own thread. */
+  readonly composeTarget?: ComposerThreadTarget | undefined;
+  readonly onComposeClose?: (() => void) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
+  const composeTarget = props.composeTarget ?? props.threadRef;
+  const compose = usePageCompose({
+    title: props.title,
+    composeTarget,
+    onComposeClose: props.onComposeClose,
+  });
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [src] = useState(() => `${props.src.split("#", 1)[0]}${htmlRenderThemeFragment(theme)}`);
   const [loaded, setLoaded] = useState(false);
@@ -283,6 +370,7 @@ export function HtmlRenderDocument(props: {
       props.onContentHeight?.(height);
       return;
     }
+    if (compose(frame, event.data)) return;
     if (document.activeElement !== frame || navigator.userActivation?.isActive === false) return;
     const linkRequest = readHtmlRenderLinkRequest(event.data);
     if (linkRequest !== undefined) {
@@ -331,6 +419,9 @@ export function HtmlRenderDocument(props: {
           // Covers a theme change that landed while the page was loading.
           postTheme();
           postShortcuts();
+          if (composeTarget !== undefined) {
+            frameRef.current?.contentWindow?.postMessage(pageHostMessage(), "*");
+          }
         }}
         // Match the blank document's scheme to avoid dark-mode white flashes, then follow the app after load.
         className={cn("border-0 scheme-light", props.className)}
